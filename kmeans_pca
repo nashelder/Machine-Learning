@@ -1,0 +1,766 @@
+# Problem Set 3: Clustering and Dimensionality Reduction
+
+To run and solve this assignment, one must have a working IPython Notebook installation. The easiest way to set it up for both Windows and Linux is to install [Anaconda](https://www.anaconda.com/products/individual). Then save this file to your computer, run Anaconda and choose this file in Anaconda's file explorer. Use `Python 3` version. The statements below assume that you have already followed these instructions. If you are new to Python or its scientific library, Numpy, there are some nice tutorials [here](https://www.learnpython.org/) and [here](http://www.scipy-lectures.org/).
+
+To run code in a cell or to render [Markdown](https://en.wikipedia.org/wiki/Markdown)+[LaTeX](https://en.wikipedia.org/wiki/LaTeX) press `Ctr+Enter` or `[>|]`(like "play") button above. To edit any code or text cell double click on its content. To change cell type, choose "Markdown" or "Code" in the drop-down menu above. Here are some useful resources for [Markdown guide](https://www.markdownguide.org/basic-syntax/) and [LaTeX tutorial](https://www.overleaf.com/learn/latex/Learn_LaTeX_in_30_minutes) if you are not familiar with the basic syntax.
+
+If a certain output is given for some cells, that means that you are expected to get similar results in order to receive full points (small deviations are fine). For some parts we have already written the code for you. You should read it closely and understand what it does.
+
+Only **PDF** files are accepted for ps1 submission. To print this notebook to a pdf file, you can go to "File" -> "Download as" -> "PDF via LaTex(.pdf)" or simply use "print" in browser. 
+
+**Total: 200 points** (70 (Q1) + 70 (Q2) + 60 (Q3)).
+### 1. $K$-means Clustering
+
+In this exercise, you will implement the $K$-means algorithm and
+use it for image compression. You will first start on an example 2D
+dataset that will help you gain an intuition of how the $K$-means
+algorithm works. After, you will use the $K$-means algorithm for image
+compression by reducing the number of colors that occur in an image to
+only those that are most common. 
+
+**1\.1 Implementing $K$-means**
+
+The $K$-means algorithm is a method to automatically cluster similar
+data examples together. Concretely, you are given a training set
+$\{ x_1 ,
+    \cdots , x_m\} \text{where } x_i \in \mathbb{R}^n$, and we want to
+group the data into a few cohesive clusters. The intuition behind
+$K$-means is an iterative procedure that starts by guessing the initial
+centroids, and then refines this guess by repeatedly assigning examples
+to their closest centroids and then recomputing the centroids based on
+the assignments.
+
+The inner loop of the algorithm repeatedly carries out two steps:
+
+1.  Assigning each training example x to its closest centroid
+
+2.  Recomputing the mean of each centroid using the points assigned to
+    it
+
+The $K$-means algorithm will always converge to some final set of means
+for the centroids. Note that the converged solution may not always be
+ideal and depends on the initial setting of the centroids. Therefore, in
+practice the $K$-means algorithm is usually run a few times with
+different random initializations. One way to choose between the
+solutions from different random initializations is to choose the one
+with the lowest cost function value (distortion). You will implement the
+two phases of the $K$-means algorithm separately in the next sections.
+**1.2 Visualizing the data**
+
+Run the provided code below and take a look at the resulting plot to gain an understanding of the
+distribution of the data. It is two dimensional, with $x_1$ and $x_2$. The "x" markers are the initial centroids of the clustering algorithm, where $K=3$.
+
+from __future__ import absolute_import
+
+import random
+
+import matplotlib.pyplot as plt
+import numpy as np
+import scipy.io
+import scipy.misc
+
+
+def plot_data(samples, centroids, clusters=None):
+    """
+    Plot samples and color it according to cluster centroid.
+    :param samples: samples that need to be plotted.
+    :param centroids: cluster centroids.
+    :param clusters: list of clusters corresponding to each sample.
+    If clusters is None, all points are plotted with the same color.
+    """
+
+    colors = ['blue', 'green', 'gold']
+    assert centroids is not None
+
+    if clusters is not None:
+        sub_samples = []
+        for cluster_id in range(centroids[0].shape[0]):
+            sub_samples.append(np.array([samples[i] for i in range(samples.shape[0]) if clusters[i] == cluster_id]))
+    else:
+        sub_samples = [samples]
+
+    plt.figure(figsize=(7, 5))
+
+    for clustered_samples in sub_samples:
+        cluster_id = sub_samples.index(clustered_samples)
+        plt.plot(clustered_samples[:, 0], clustered_samples[:, 1], 'o', color=colors[cluster_id], alpha=0.75,
+                 label='Data Points: Cluster %d' % cluster_id)
+
+    plt.xlabel('x1', fontsize=14)
+    plt.ylabel('x2', fontsize=14)
+    plt.title('Plot of X Points', fontsize=16)
+    plt.grid(True)
+
+    # Drawing a history of centroid movement, first centroid is black
+    tempx, tempy = [], []
+    for mycentroid in centroids:
+        tempx.append(mycentroid[:, 0])
+        tempy.append(mycentroid[:, 1])
+                    
+    plt.plot(tempx, tempy, 'rx--', markersize=8)
+    plt.plot(tempx[0], tempy[0], 'kx', markersize=8)
+    
+    plt.legend(loc=4, framealpha=0.5)
+    plt.show(block=True)
+
+
+datafile = 'data/data2.mat'
+mat = scipy.io.loadmat(datafile)
+samples = mat['X']
+# samples contain 300 pts, each has two coordinates
+print(samples.shape)
+
+# Choose the initial centroids
+initial_centroids = np.array([[3, 3], [6, 2], [8, 5]])
+plot_data(samples, [initial_centroids])
+
+**1.3 Finding closest centroids \[20 pts\]**
+
+In the cluster assignment phase of the $K$-means algorithm, the
+algorithm assigns every training example $x_i$ to its closest centroid,
+given the current positions of centroids. Specifically, for every
+example $i$ we set
+
+$$c_i := \arg\min_j ||x_i - \mu_j||^2$$
+
+where $c_i$ is the index of the centroid that is closest to $x_i$, and j
+is the position (index) of the $j$-th centroid.
+
+Your task is to complete the code in *find_closest_centroids*. This
+function takes the data matrix samples and the locations of all
+centroids and should output a one-dimensional array of clusters that
+holds the index (a value in $\{1,\cdots,K\}$, where $K$ is total number
+of clusters) of the closest centroid to every training example. You can
+implement this using a loop over every training example and every
+centroid.
+
+Once you have completed the code in *find_closest_centroids*, run
+it and you should see the output $[ 0, 2, 1]$ corresponding to the
+centroid assignments for the first 3 examples.
+
+def find_closest_centroids(samples, centroids):
+    """
+    Find the closest centroid for all samples.
+
+    :param samples: input data samples.
+    :param centroids: an array of cluster centroids.
+    :return: a list of cluster assignments (indices) for each sample.
+    """
+    
+    centroid_distance = np.zeros((samples.shape[0],centroids.shape[0]))
+
+    for point in range(samples.shape[0]):
+        #for centroid in range(centroids.shape[0]):
+        for centroid in range(centroids.shape[0]):
+            centroid_distance[point][centroid] = np.linalg.norm(samples[point]-centroids[centroid])**2
+    closest_centroid = np.zeros((samples.shape[0],1))
+
+    for c in range(centroid_distance.shape[0]):
+        closest_centroid[c] = np.argmin(centroid_distance[c])
+    
+    return closest_centroid
+
+clusters = find_closest_centroids(samples, initial_centroids)
+print(samples.shape)
+print(clusters.shape)
+# you should see the output [0, 2, 1] corresponding to the
+# centroid assignments for the first 3 examples.
+print(clusters[:3].flatten())
+plot_data(samples, [initial_centroids], clusters)
+**1.4 Computing centroid means \[20 pts\]**
+
+Given assignments of every point to a centroid, the second phase of the
+algorithm recomputes, for each centroid, the mean of the points that
+were assigned to it. Specifically, for every centroid $k$ we set
+
+$$\mu_k := \frac{1}{|C_k|}\sum_{i\in C_k} x_i$$
+
+where $C_k$ is the set of examples that are assigned to centroid $k$.
+Concretely, if only two examples say $x_3$ and $x_5$ are assigned to centroid
+$k
+    = 2$, then you should update
+
+$$\mu_2=\frac{1}{2}(x_3 + x_5).$$
+
+Complete the code in *get_centroids* to do this. 
+def get_centroids(samples, clusters):
+    """
+    Find the new centroid (mean) given the samples and their cluster.
+
+    :param samples: samples.
+    :param clusters: list of clusters corresponding to each sample.
+    :return: an array of centroids.
+    """
+    #kmean = [0,1,2]
+    kmean = int(np.amax(clusters)+1)
+    centroids = np.zeros((kmean,samples.shape[1]))
+    for k in range(kmean):
+        x_sum = np.zeros((1, samples.shape[1]))
+        count = 0
+        for point in range(samples.shape[0]):
+            if clusters[point] == k:
+                x_sum += samples[point]
+                count += 1
+        
+        centroids[k,:] = x_sum/count
+    
+    return centroids
+        
+        
+            
+
+        
+Once you have completed it, *run_k_means* below will run your code and output the centroids after
+the first step of $K$-means. The final centroids should be roughly \[\[
+1.9 5.0\] \[ 3.0 1.0\] \[ 6.0 3.0\]\].
+
+The code below will produce a visualization that plots the progress of the algorithm at each iteration. The red crosses show how each step of the $K$-means algorithm changes the centroids. You should also see the final cluster assignments as color-coded points.
+
+def run_k_means(samples, initial_centroids, n_iter):
+    """
+    Run K-means algorithm. The number of clusters 'K' is defined by the size of initial_centroids
+    :param samples: samples.
+    :param initial_centroids: a list of initial centroids.
+    :param n_iter: number of iterations.
+    :return: a pair of cluster assignment and history of centroids.
+    """
+
+    centroid_history = []
+    current_centroids = initial_centroids
+    clusters = []
+    for iteration in range(n_iter):
+        centroid_history.append(current_centroids)
+        print("Iteration %d, Finding centroids for all samples..." % iteration)
+        clusters = find_closest_centroids(samples, current_centroids)
+        print("Recompute centroids...")
+        current_centroids = get_centroids(samples, clusters)
+
+    return clusters, centroid_history
+# Run the full K-means algorithm and plot the results
+clusters, centroid_history = run_k_means(samples, initial_centroids, n_iter=10)
+plot_data(samples, centroid_history, clusters)
+**1.5 Random initialization \[10 pts\]**
+
+The initial assignments of centroids for the example dataset in the previous section were designed so that you could test your algorithm, i.e., if you implemented it correctly you would see the same output as we provided.  In practice, a good strategy for initializing the centroids is to select random examples from the training set.
+
+In this part of the exercise, you should complete the function *choose_random_centroids*. You should randomly permute the indices of the examples using random seed 7. Then, select the first $K$ examples
+based on the random permutation of the indices. This should allow the examples to be selected at random without the risk of selecting the same example twice. You will see how the random initialization affects the first few iterations of clustering, and also possibly, results in a
+different cluster assignment.
+def choose_random_centroids(samples, K):
+    """
+    Randomly choose K centroids from samples.
+    :param samples: samples.
+    :param K: K as in K-means. Number of clusters.
+    :return: an array of centroids.
+    """
+    #initial_centroids = np.zeros((K,samples.shape[1]))
+    np.random.seed(7)
+    r = random.choices(samples, k = K)
+    centroids = np.array(r)
+    return centroids
+    # for c in range(initial_centroids.shape[0]):
+    #     r = np.random.choice(samples.shape[0])
+    #     initial_centroids[c] = samples[r]
+    
+    # return initial_centroids
+# Let's choose random initial centroids and see the resulting
+# centroid progression plot.. run it a few times, see if you can
+# find a particularly bad case (no need to report it)
+
+clusters, centroid_history = run_k_means(samples, choose_random_centroids(samples, K=3), n_iter=10)
+plot_data(samples, centroid_history, clusters)
+
+**1.6 Image compression with $K$-means \[20 pts\]**
+
+In this exercise, you will apply your implemented $K$-means algorithm to image compression.
+
+In a 24-bit color representation of an image, each pixel is represented
+as three 8-bit unsigned integers (ranging from 0 to 255) that specify
+the red, green and blue intensity values. This is often referred to as
+the RGB encoding. Our image contains thousands of colors, and in this
+part of the exercise, you will reduce the number of colors to 16.
+
+By making this reduction, it is possible to represent the photo in an
+efficient way (compressed). Specifically, you only need to store the RGB
+values of the 16 selected colors, and for each pixel in the image you
+now need to only store the index of the color at that location (where
+only 4 bits are necessary to represent 16 possibilities).
+
+In this exercise, you will use the $K$-means algorithm to select the 16
+colors that will be used to represent the compressed image. Concretely,
+you will treat every pixel in the original image as a data example and
+use the $K$-means algorithm to find the 16 colors that best group
+(cluster) the pixels in the 3-dimensional RGB space. Once you have
+computed the cluster centroids on the image, you will then use the 16
+colors to replace the pixels in the original image.
+
+The code below creates a three-dimensional matrix *bird_small* whose
+first two indices identify a pixel position and whose last index
+represents red, green, or blue. For example, *bird\_small(50, 33, 2)*
+gives the blue intensity of the pixel at row 50 and column 33.
+
+from __future__ import absolute_import
+
+import matplotlib.pyplot as plt
+import numpy as np
+import scipy
+import imageio
+
+datafile = 'data/bird_small.png'
+# This creates a three-dimensional matrix bird_small whose first two indices
+# identify a pixel position and whose last index represents red, green, or blue.
+#bird_small = scipy.misc.imread(datafile)
+bird_small = imageio.imread(datafile)
+
+print("bird_small shape is ", bird_small.shape)
+plt.imshow(bird_small)
+
+Write code below to call your $K$-means function to cluster the pixels colors in the image into $K$ clusters.
+
+After finding the top K = 16 colors to represent the image, assign each pixel position to its closest centroid using the findClosestCentroids function. This allows you to represent the original image using the centroid assignments of each pixel. Notice that you have significantly reduced the number of bits that are required to describe the image. The original image required 24 bits for each of the
+$128 \times 128$ pixel locations, resulting in a total of $128 \times 128 \times 24 = 393,216$ bits. 
+
+The new representation requires some overhead storage in the form of a dictionary of 16 colors, each of which require 24 bits, but the image itself now only requires 4 bits per pixel location. The final number of bits used is therefore $16 \times 24 + 128 \times  128 \times  4 = 65,920$ bits, which corresponds to compressing the original image by about a factor of 6.
+
+Finally, show the effect of the compression by reconstructing the image based only on the centroid assignments.
+# Divide every entry in bird_small by 255 so all values are in the range of 0 to 1
+bird_small = bird_small / 255.
+
+# Unroll the image to shape (16384,3) (16384 is 128*128)
+bird_small = bird_small.reshape(-1, 3)
+
+# Run k-means on this data, forming 16 clusters, with random initialization
+
+clusters, centroid_history = run_k_means(bird_small, choose_random_centroids(bird_small, K=16), n_iter=10)
+centroids = centroid_history[-1]
+
+# Now we have 16 centroids, each representing a color.
+# Let's assign an index to each pixel in the original image dictating
+# which of the 16 colors it should be. Use your find_closest_centroids 
+# function and store the result in "clusters"
+
+clusters = find_closest_centroids(bird_small, centroids)
+
+
+# Now loop through the original image and form a new image
+# that only has 16 colors in it
+final_image = np.zeros((clusters.shape[0], 3))
+for point in range(bird_small.shape[0]):
+    final_image[point] = centroids[int(clusters[point])]
+
+# Reshape the original image and the new, final image and draw them
+# To see what the "compressed" image looks like
+plt.figure()
+plt.imshow(bird_small.reshape(128, 128, 3))
+plt.figure()
+plt.imshow(final_image.reshape(128, 128, 3))
+plt.show()
+
+### 2. Principal Components Analysis
+
+In this exercise, you will use principal component analysis (PCA) to
+perform dimensionality reduction. You will first experiment with an
+example 2D dataset to get intuition on how PCA works, and then use it on
+a bigger dataset of 5000 face image dataset. We will help you step through the first half of the exercise using provided code.
+
+### 2.1 Example Dataset 
+
+To help you understand how PCA works, you will first start with a 2D
+dataset which has one direction of large variation and one of smaller
+variation. The code below will plot the training data.
+
+In this part of the exercise, you will visualize what happens when you
+use PCA to reduce the data from 2D to 1D. In practice, you might want to
+reduce high dimensional data (such as from 256 to 50 dimensions), but
+using lower dimensional data in this example allows us to better
+visualize the algorithm.
+
+import matplotlib.pyplot as plt
+import numpy as np
+import scipy
+import scipy.io
+
+datafile = 'data/data1.mat'
+mat = scipy.io.loadmat(datafile)
+samples = mat['X']
+
+plt.figure(figsize=(7, 7))
+plt.scatter(samples[:, 0], samples[:, 1], s=30, facecolors='none', edgecolors='b')
+plt.title("Example Dataset", fontsize=18)
+plt.grid(True)
+
+### 2.2 Implementing PCA \[20 pts\]
+
+In this part of the exercise, you will implement PCA. PCA consists of
+two computational steps: First, you compute the covariance matrix of the
+data. Then, you use SVD (the scipy.linalg SVD function) to compute the
+eigenvectors $U_1, U_2, \cdots , U_n$. These will correspond to the principal
+components of variation in the data. 
+
+Before using PCA, it is important to first normalize the data. Normalize each feature by subtracting the mean value (to have zero mean), and scaling (to have unit variance) so that they are in the same range.
+
+After normalizing the data, your task is to complete the code to compute the principal components of the dataset. First, you should compute the covariance matrix of the data, which is given by:
+
+$$\Sigma = \frac{1}{m}X^T X$$
+
+where $X$ is the data matrix with examples in rows, and $m$ is the number of examples. Note that here $\Sigma$ refers to a $n\times n$ matrix and not the summation operator. After computing the covariance matrix, you can run SVD on it to compute the principal components.
+
+Once you have completed the code, the script below will run PCA on the example dataset and plot the corresponding principal components found. The script will also output the top principal component (eigenvector) found, which should be around \[-0.707 -0.707\].
+import scipy.linalg
+
+def feature_normalize(samples):
+    """
+    Feature-normalize samples
+    :param samples: samples.
+    :return: normalized feature
+    """
+    
+    means = np.mean(samples, axis = 0)
+    stds = np.std(samples, axis = 0)
+    samples_norm = samples.copy()
+    for point in range(samples.shape[1]):
+        samples_norm[:,point] = ((samples_norm[:,point] - means[point])/stds[point])
+    
+    return means, stds, samples_norm
+
+
+def get_usv(samples_norm):
+    # Compute the covariance matrix
+    # Run single value decomposition to get the U principal component matrix
+    cov = (1/samples_norm.shape[0])*(samples_norm.T@samples_norm)
+    [U, S, V] = scipy.linalg.svd(cov)
+
+    return U, S, V
+
+# Feature normalize
+means, stds, samples_norm = feature_normalize(samples)
+
+# Run SVD
+U, S, V = get_usv(samples_norm)
+    
+# output the top principal component (eigen- vector) found
+# should expect to see an output of about [-0.707 -0.707]"
+print('Top principal component is ', U[:, 0])
+
+plt.figure(figsize=(7, 7))
+plt.scatter(samples[:, 0], samples[:, 1], s=30, facecolors='none', edgecolors='b')
+plt.title("Example Dataset: PCA Eigenvectors Shown", fontsize=18)
+plt.xlabel('x1', fontsize=18)
+plt.ylabel('x2', fontsize=18)
+plt.grid(True)
+# To draw the principal component, you draw them starting
+# at the mean of the data
+plt.plot([means[0], means[0] + S[0] * U[0, 0]],
+        [means[1], means[1] + S[0] * U[1, 0]],
+        color='red', linewidth=3,
+        label='First Principal Component')
+plt.plot([means[0], means[0] + S[1] * U[0, 1]],
+        [means[1], means[1] + S[1] * U[1, 1]],
+        color='fuchsia', linewidth=3,
+        label='Second Principal Component')
+plt.legend(loc=4)
+
+### 2.3 Dimensionality Reduction with PCA 
+
+After computing the principal components, you can use them to reduce the feature dimension of your dataset by projecting each example onto a lower dimensional space, $x^i\rightarrow z^i$ (e.g., projecting the data from 2D to 1D).  In this part of the exercise, you will use the eigenvectors returned by PCA and project the example dataset into a 1-dimensional space. 
+
+In practice, if you were using a learning algorithm such as linear regression or perhaps neural networks, you could now use the projected data instead of the original data.  By using the projected data, you can train your model faster as there are fewer dimensions in the input.
+
+**2.3.1 Projecting the data onto the principal components \[10 pts\]**
+
+You should now complete the code in *project_data(samples, U, K)*. Specifically, you are
+ given a dataset of samples, the principal components U, and the desired number
+ of dimensions to reduce to K.  You should project each example in samples
+ onto the top K components in U. Note that the top K components in U are
+ given by the first K columns of U, that is $reduced\_U = U(:, 1:K)$.
+
+Once you have completed the code, it will project the first example onto
+    the first dimension and you should see a value of about 1.49 (or possibly
+    -1.49, if you got -U1 instead of U1).
+def project_data(samples, U, K):
+    """
+    Computes the reduced data representation when
+    projecting only on to the top "K" eigenvectors
+    """
+    # Reduced U is the first "K" columns in U
+    reduced_U = U[:,0:K]
+    Z = samples@reduced_U
+    return Z
+
+    
+# project the first example onto the first dimension
+# should see a value of about 1.481"
+Z = project_data(samples_norm, U, 1)
+print('Projection of the first example is %0.3f.' % float(Z[0]))
+print(Z.shape)
+
+**2.3.2 Reconstructing an approximation of the data \[10 pts\]**
+
+After projecting the data onto the lower dimensional space, you can
+    approximately recover the data by projecting them back onto the original
+    high dimensional space.  Your task is to complete *recover_data(Z, U, K)* to project
+    each example in Z back onto the original space and return the recovered
+    approximation in *recovered\_sample*.
+
+Once you have completed the code, it will recover an approximation of the
+    first example and you should see a value of about [-1.05 -1.05].
+
+def recover_data(Z, U, K):
+    
+    reduced_U = U[:,:K]
+    recovered_sample = Z@reduced_U.T
+
+    return recovered_sample
+
+    
+# reconstruct the samples
+recovered_sample = recover_data(Z, U, 1)
+print('Recovered approximation of the first example is ', recovered_sample[0])
+**2.3.3 Visualizing the projections \[10 pts\]**
+
+After completing both *project\_data* and *recover\_data*, the script below should now
+    perform both the projection and approximate reconstruction to show how the
+    projection affects the data.  In the plot, the original
+    data points are indicated with the blue circles, while the projected data
+    points are indicated with the red circles.  The projection effectively only
+    retains the information in the direction given by U1. If the plot looks correct, you get full points for this part.
+plt.figure(figsize=(7, 7))
+plt.scatter(samples_norm[:, 0], samples_norm[:, 1], s=30, facecolors='none',
+            edgecolors='b', label='Original Data Points')
+plt.scatter(recovered_sample[:, 0], recovered_sample[:, 1], s=30, facecolors='none',
+            edgecolors='r', label='PCA Reduced Data Points')
+
+plt.title("Example Dataset: Reduced Dimension Points Shown", fontsize=14)
+plt.xlabel('x1 [Feature Normalized]', fontsize=14)
+plt.ylabel('x2 [Feature Normalized]', fontsize=14)
+plt.grid(True)
+
+for x in range(samples_norm.shape[0]):
+    plt.plot([samples_norm[x, 0], recovered_sample[x, 0]], [samples_norm[x, 1], recovered_sample[x, 1]], 'k--')
+
+plt.legend(loc=4)
+plt.xlim((-2.5, 2.5))
+plt.ylim((-2.5, 2.5))
+plt.show()
+
+### 2.4 Face Image Dataset \[20 pts\]
+
+In this part of the exercise, you will run your PCA algorithm on
+face images to see how it can be used in practice for dimension
+reduction. The file *faces.mat* contains a dataset $X$ of face images,
+each $32 \times 32$ in grayscale. Each row of $X$ corresponds to one face
+image vectorized into a row vector of length 1024. The next step will
+load and visualize the first 100 of these face images.
+
+**2.4.1 Visualizing the data**
+
+To display each row of $X$ as an image, we need to first reshape it into a 32x32 array. Implement the *get_datum_img* function below and run the visualization code. 
+import pylab
+
+def get_datum_img(row):
+    """
+    Creates an image from a single np array with shape 1x1024
+    :param row: a single np array with shape 1x1024
+    :return: the constructed image, np array of shape 32 x 32
+    """
+    return row.reshape(32,32).T
+
+
+def display_data(samples, num_rows=10, num_columns=10):
+    """
+    Function that picks the first 100 rows from X, creates an image from each,
+    then stitches them together into a 10x10 grid of images, and shows it.
+    """
+    width, height = 32, 32
+    num_rows, num_columns = num_rows, num_columns
+
+    big_picture = np.zeros((height * num_rows, width * num_columns))
+
+    row, column = 0, 0
+    for index in range(num_rows * num_columns):
+        if column == num_columns:
+            row += 1
+            column = 0
+        img = get_datum_img(samples[index])
+        big_picture[row * height:row * height + img.shape[0], column * width:column * width + img.shape[1]] = img
+        column += 1
+    plt.figure(figsize=(10, 10))
+    plt.imshow(big_picture, cmap=pylab.gray())
+
+datafile = 'data/faces.mat'
+mat = scipy.io.loadmat(datafile)
+samples = mat['X']
+display_data(samples)
+**2.4.1 PCA on Faces**
+
+To run PCA on the face dataset, we first normalize the dataset by
+normalizing each feature from the data matrix X to have zero mean and
+unit variance.
+
+After running PCA, you will obtain the principal components of the
+dataset. Notice that each principal component in U (each row) is a
+vector of length n (for the face dataset, n = 1024). It turns out that
+we can visualize these principal components by reshaping each of them
+into a $32
+    \times 32$ matrix that corresponds to the pixels in the original
+dataset. The code cell below displays the first 36 principal
+components that describe the largest variations. If you
+want, you can also change the code to display more principal components
+to see how they capture more and more details.
+
+# Feature normalize
+means, stds, samples_norm = feature_normalize(samples)
+
+# Run SVD
+U, S, V = get_usv(samples_norm)
+
+# Visualize the top 36 eigenvectors found
+display_data(U[:,:36].T, num_rows = 6, num_columns = 6)
+
+**2.4.2 Dimensionality Reduction**
+
+Now that you have computed the principal components for the face
+dataset, you can use it to perform dimensionality reduction. Reducing the dimensionality with PCA would allow you to use a learning algorithm with a smaller input size (e.g., 100 dimensions) instead of the original 1024 dimensions.
+
+The next step will project the face dataset onto only
+the first 100 principal components. Concretely, each face image is now
+described by a vector $z_i\in \mathbb{R}^{100}$.
+
+To understand what is lost in the dimension reduction, you can recover the data using only the projected dataset. In the code below, an approximate recovery of the data is performed and the projected face images are displayed. Comparing the reconstruction to the originals, you can observe that the general structure and appearance     of the face are retained while fine details are lost. This is a remarkable  reduction (more than 10$\times$) in the dataset size that can help speed up your learning algorithm significantly.  For example, if you were training a logistic regression model to perform face recognition (given a face image, predict the identity of the person), you can use the reduced input of only 100 dimensions instead of the original pixels.
+
+# Project each image down to 100 dimensions
+Z = project_data(samples_norm, U, 100)
+
+# Attempt to recover the original data
+recovered_samples = recover_data(Z,U,100)
+
+# Plot the dimension-reduced data
+display_data(recovered_samples)
+plt.show()
+
+## 3. Written Questions 
+
+### 3.1 Gaussian Mixtures \[20 pts\]
+
+Read the beginning of Section 9.2 in Bishop which describes Gaussian
+mixture models, and solve Problem 9.3:
+
+Consider a Gaussian mixture model in which the marginal distribution
+$p(z)$ for the latent variable is given by (9.10) and the conditional
+distribution $p(x|z)$ for the observed variable is given by (9.11). Show
+that the marginal distribution $p(x)$ obtained by summing $p(z)p(x|z)$
+over all possible values of z is a Gaussian mixture of the form (9.7).
+
+The equation for marginal distribution is found beginning with the two equations
+$$ p(z) = \prod_{k=1}^K \pi_k^{z_k} $$ 
+and
+$$ p(x | z) = \prod_{k=1}^K \Nu (x | \mu_k, \Sigma_k)^{z_k} $$
+
+From probability
+
+$$ p(x) = p(z)p(x | z) $$
+
+Summing these two equations is shown below
+
+$$ p(z)p(x | z) = \sum_{k=1}^K [\prod_{k=1}^K \pi_k^{z_k} \prod_{k=1}^K \Nu (x | \mu_k, \Sigma_k)^{z_k}] $$
+
+Combining the products
+
+$$ p(z) + p(x | z) = \sum_{k=1}^K \prod_{k=1}^K [(\pi_k)(\Nu (x | \mu_k, \Sigma_k))]^{z_k} $$
+
+Substitute $\alpha $ for the term in the product
+
+$$ p(z) + p(x | z) = \sum_{k=1}^K \prod_{k=1}^K \alpha_k $$
+
+Taking the product and sum
+
+$$ p(z) + p(x | z) = \alpha_1 + \alpha_2 + ... + \alpha_k $$
+
+This is equivalent to
+
+$$ p(z) + p(x | z) = \sum_{k=1}^K \alpha_k $$
+
+So, finally
+
+$$ p(x) = \sum_{k = 1}^K \pi_k \Nu (x | \mu_k, \Sigma_k) $$
+
+
+### 3.2 K-means vs GMM \[20 pts\]
+
+Discuss how you would modify $K$-means to make it a Gaussian mixture
+model. Compare and contrast the two methods.
+**The K-means algorithm is defined by the following method. Usually, random sample points are chosen to initiate the cluster means. The number of clusters is specified by the user.**
+
+**Next, a calculation is done on sample values, finding the distance to each cluster mean and finding the shortest distance. This is shown in: $c_i := \arg\min_j ||x_i - \mu_j||^2$. Each sample is assigned to a specific cluster, whichever it is closest to.**
+
+**The next step in the K-means algorithm is to re-calculate the mean using every point in the specific cluster. This becomes the new cluster mean. This is shown: $\mu_k := \frac{1}{|C_k|}\sum_{i\in C_k} x_i$. Samples are then re-assigned to the new means.**
+
+**This proccess loops for a number of iterations. In a successful run, the cluster mean continues to shift its position until it has centered well on sample clusters.**
+
+**This process can be modified by defining both a mean and variance, instead of just a mean.**
+
+**During the assignment phase, instead of a strict cluster assignment, we can use a "soft" membership. This is defined using the Gaussian distribution, and a probability that the certain sample datapoint belongs to a cluster.**
+
+**Both K-means and Gaussian mixture models operate by deciding the locations of means and memberships of points to clusters. However, the main difference is which data is considered when iterating the location of the cluster means. For each cluster mean, K-means will only consider the data points have been deemed closest and assigned to that cluster. In contrast, the Gaussian mixture model considers all points, and uses the mean and variance for each cluster for re-assignment. The Gaussian mixture model is more powerful than K-means because it considers variance.**
+
+
+
+
+### 3.3 PCA \[20 pts\]
+
+Go through Section 12.1.2 which describes the Minimum-error formulation
+of PCA and perform omitted computations. Specifically, do all the
+derivations necessary to show that
+
+0.  Before (12.9) $$\alpha_{nj} = \mathrm{x}_n^\mathrm{T}\mathrm{u}_j$$
+
+1.  Eqn (12.12) $$z_{nj} = \mathrm{x}_n^\mathrm{T}\mathrm{u}_j$$
+
+2.  Eqn (12.13) $$b_{j} = \overline{\mathrm{x}}^\mathrm{T}\mathrm{u}_j$$
+
+3.  In case of two-dimensional data space
+    $$ \mathrm{S}\mathrm{u}_2 = \lambda_2\mathrm{u}_2 $$ 
+    
+    $$ J = \lambda_2 $$
+**0.**
+
+Starting with a complete orthonormal set of basis vectors
+
+$$ u_i^T u_j = \delta_{ij} $$
+
+This can be represented as a lunear combination of basis vectors
+
+$$ x_n = \sum_{i=1}^D \alpha_{ni} \mathrm{u}_i $$
+
+Next, we can take the inner product with $\mathrm{u}_j$
+
+$$ \langle \mathrm{x}_n, \mathrm{u}_j \rangle = \langle \sum_{i=1}^D \alpha_{ni} \mathrm{u}_i, \mathrm{u}_j \rangle $$
+
+Under the conditions $ i = j $
+
+$$ \langle \mathrm{x}_n, \mathrm{u}_j \rangle = 1 $$
+
+and all other terms = 0. Therefore, when i = j
+
+$$ \langle \alpha_{ni} \mathrm{x}_n, \mathrm{u}_j \rangle = \alpha_{nj} $$
+
+Finally
+
+
+
+$$ \alpha_{nj} = \mathrm{x}_n^\mathrm{T}\mathrm{u}_j $$
+
+**1.**
+
+$$z_{nj} = \mathrm{x}_n^\mathrm{T}\mathrm{u}_j$$
+
+**2.**
+
+$$b_{j} = \overline{\mathrm{x}}^\mathrm{T}\mathrm{u}_j$$
+
+**3.**
+
+$$ \mathrm{S}\mathrm{u}_2 = \lambda_2\mathrm{u}_2 $$ 
+    
+$$ J = \lambda_2 $$
+
